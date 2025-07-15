@@ -1,0 +1,30 @@
+from dotenv import load_dotenv
+from langchain.chat_models import ChatOpenAI
+from langchain.agents import initialize_agent, Tool
+from langchain.agents.agent_types import AgentType
+import os
+
+# Charger les variables d'environnement (clé API OpenAI)
+load_dotenv()
+
+# Initialiser le modèle GPT
+llm = ChatOpenAI(
+    temperature=0,
+    model="gpt-3.5-turbo"  # ou "gpt-4" si tu as accès
+)
+
+# Aucun outil pour l'instant (agent simple)
+tools = []
+
+# Créer l'agent
+agent = initialize_agent(
+    tools=tools,
+    llm=llm,
+    agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+    verbose=True
+)
+
+# Exemple d'interaction
+question = "Quelle est la capitale du Maroc ?"
+reponse = agent.run(question)
+print(f"🧠 Réponse de l'agent : {reponse}")
