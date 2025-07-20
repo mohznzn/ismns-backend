@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
+import os
 from agent import generer_questions  # ⬅️ Ton IA
 
 app = Flask(__name__)
@@ -38,4 +39,5 @@ def get_qcm(qcm_id):
 
 
 if __name__ == "__main__":
-    app.run(port=8000, debug=True)
+    port = int(os.environ.get("PORT", 5000))  # ⚠️ utilise le port dynamique de Render
+    app.run(host="0.0.0.0", port=port)
