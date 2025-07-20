@@ -1,12 +1,11 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
-from agent import generer_questions  # ⬅️ Fonction IA importée ici
+from agent import generer_questions  # ⬅️ Ton IA
 
 app = Flask(__name__)
 CORS(app)
 
-# Mémoire temporaire pour stocker les QCMs
 qcm_storage = {}
 
 @app.route('/generate_qcm', methods=['POST'])
@@ -19,15 +18,15 @@ def generate_qcm():
         return jsonify({"error": "Le thème et le niveau sont requis."}), 400
 
     try:
-        # 🧠 Générer les questions via l’agent IA
         questions = generer_questions(theme, niveau)
     except Exception as e:
-        return jsonify({"error": f"Erreur lors de la génération du QCM : {str(e)}"}), 500
+        return jsonify({"error": f"Erreur IA : {str(e)}"}), 500
 
     qcm_id = str(uuid.uuid4())
     qcm_storage[qcm_id] = questions
 
     return jsonify({"qcm_id": qcm_id})
+
 
 @app.route('/get_qcm/<qcm_id>', methods=['GET'])
 def get_qcm(qcm_id):
@@ -36,6 +35,7 @@ def get_qcm(qcm_id):
         return jsonify({"questions": questions})
     else:
         return jsonify({"error": "QCM introuvable"}), 404
+
 
 if __name__ == "__main__":
     app.run(port=8000, debug=True)
