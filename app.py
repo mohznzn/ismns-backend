@@ -5,7 +5,7 @@ import os
 from agent import generer_questions  # ⬅️ Ton IA
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://ismns-frontend.vercel.app"])
 
 qcm_storage = {}
 
