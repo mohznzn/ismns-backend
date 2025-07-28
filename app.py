@@ -5,7 +5,16 @@ import json
 from agent import generer_chapitres, generer_questions_chapitre  # Nouvelles fonctions IA
 
 app = Flask(__name__)
-CORS(app, origins=["https://ismns-frontend-u46v.vercel.app"])
+
+# ✅ Autorise toutes les origines pour éviter les blocages CORS (tu pourras restreindre plus tard)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# ✅ Gestion explicite des pré-requêtes OPTIONS (préflight)
+@app.before_request
+def handle_options():
+    if request.method == "OPTIONS":
+        return '', 200
+
 
 # --- Endpoint pour obtenir les chapitres ---
 @app.route('/get_chapters', methods=['POST'])
