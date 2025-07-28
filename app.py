@@ -5,7 +5,7 @@ import json
 from agent import generer_chapitres, generer_questions_chapitre  # Nouvelles fonctions IA
 
 app = Flask(__name__)
-CORS(app, origins=["https://ismns-frontend.vercel.app"])
+CORS(app, origins=["https://ismns-frontend-u46v.vercel.app"])
 
 # --- Endpoint pour obtenir les chapitres ---
 @app.route('/get_chapters', methods=['POST'])
