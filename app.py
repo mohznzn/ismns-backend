@@ -2,17 +2,14 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import json
-from agent import generer_questions, lister_chapitres  # ton IA
+from agent import generer_chapitres, generer_questions_chapitre  # Nouvelles fonctions IA
 
 app = Flask(__name__)
 CORS(app, origins=["https://ismns-frontend.vercel.app"])
 
-# --- Route 1 : Récupérer la liste des chapitres pour un thème ---
-@app.route('/get_chapitres', methods=['POST'])
-def get_chapitres():
-    """
-    Récupère les chapitres à maîtriser pour un thème donné.
-    """
+# --- Endpoint pour obtenir les chapitres ---
+@app.route('/get_chapters', methods=['POST'])
+def get_chapters():
     data = request.get_json()
     theme = data.get('theme')
 
@@ -20,19 +17,16 @@ def get_chapitres():
         return jsonify({"error": "Le thème est requis."}), 400
 
     try:
-        chapitres = lister_chapitres(theme)
+        chapitres = generer_chapitres(theme)
     except Exception as e:
         return jsonify({"error": f"Erreur IA : {str(e)}"}), 500
 
     return jsonify({"chapitres": chapitres})
 
 
-# --- Route 2 : Générer les questions pour un chapitre ---
-@app.route('/generate_questions', methods=['POST'])
-def generate_questions():
-    """
-    Génère 30 questions sur un chapitre choisi.
-    """
+# --- Endpoint pour générer 30 questions sur un chapitre ---
+@app.route('/generate_qcm_chapter', methods=['POST'])
+def generate_qcm_chapter():
     data = request.get_json()
     chapitre = data.get('chapitre')
 
@@ -40,7 +34,7 @@ def generate_questions():
         return jsonify({"error": "Le chapitre est requis."}), 400
 
     try:
-        questions = generer_questions(chapitre, nb_questions=30)
+        questions = generer_questions_chapitre(chapitre)
     except Exception as e:
         return jsonify({"error": f"Erreur IA : {str(e)}"}), 500
 

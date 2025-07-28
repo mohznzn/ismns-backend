@@ -4,81 +4,62 @@ from langchain_openai import ChatOpenAI
 import os
 import re
 
-# 🔐 Charger la clé API OpenAI
 load_dotenv()
 
-# 🧠 Initialiser le modèle
 llm = ChatOpenAI(
     temperature=0,
     model="gpt-3.5-turbo"
 )
 
-# === NOUVELLES FONCTIONS POUR LE BACKEND ===
-
-def lister_chapitres(theme):
-    """
-    Utilise l'IA pour lister les chapitres importants d'un thème donné.
-    """
-    agent_chapitres = Agent(
-        role="Expert en planification d'études",
-        goal="Lister les chapitres clés pour bien maîtriser un thème",
-        backstory="Spécialiste en pédagogie et en certifications",
+# --- Générer les chapitres d'un thème ---
+def generer_chapitres(theme):
+    agent = Agent(
+        role="Expert en formation",
+        goal="Lister les chapitres essentiels pour préparer une certification sur un thème donné",
+        backstory="Expert pédagogique spécialisé dans les certifications professionnelles",
         verbose=False,
         allow_delegation=False,
         llm=llm
     )
 
-    task_chapitres = Task(
-        description=(
-            f"Liste 5 à 7 chapitres importants pour bien préparer le thème '{theme}'. "
-            "Donne uniquement la liste des chapitres sous forme de phrases courtes."
-        ),
-        expected_output="Une liste simple des chapitres, un par ligne.",
-        agent=agent_chapitres
+    task = Task(
+        description=f"Donne-moi une liste de chapitres à maîtriser pour préparer une certification sur le thème : {theme}. Renvoie uniquement la liste numérotée.",
+        expected_output="Une liste de chapitres au format JSON ou liste Python",
+        agent=agent
     )
 
-    crew_temp = Crew(
-        agents=[agent_chapitres],
-        tasks=[task_chapitres],
-        verbose=False
-    )
+    crew = Crew(agents=[agent], tasks=[task], verbose=False)
+    response = str(crew.kickoff())
 
-    chapitres_text = str(crew_temp.kickoff())
-    chapitres = [c.strip("-• ").strip() for c in chapitres_text.split("\n") if c.strip()]
-
+    # Extraire les chapitres ligne par ligne
+    chapitres = [line.strip(" -0123456789.") for line in response.split("\n") if line.strip()]
     return chapitres
 
 
-def generer_questions(chapitre, nb_questions=30):
-    """
-    Génère un QCM pour un chapitre donné avec un nombre de questions paramétrable.
-    """
-    agent_generateur = Agent(
+# --- Générer 30 questions pour un chapitre ---
+def generer_questions_chapitre(chapitre):
+    agent = Agent(
         role="Générateur de QCM",
-        goal=f"Créer un QCM de {nb_questions} questions avec 4 choix et la bonne réponse",
+        goal="Créer un QCM de 30 questions avec 4 choix et la bonne réponse",
         backstory="Expert pédagogique spécialisé dans la création d'examens",
         verbose=False,
         allow_delegation=False,
         llm=llm
     )
 
-    task_qcm = Task(
+    task = Task(
         description=(
-            f"Génère un QCM de {nb_questions} questions sur le chapitre : {chapitre}. "
+            f"Génère un QCM de 30 questions sur le chapitre : {chapitre}. "
             "Chaque question doit avoir 4 choix (A, B, C, D) et une seule bonne réponse. "
             "Format :\nQuestion 1: ...\nA) ...\nB) ...\nC) ...\nD) ...\nRéponse : X"
         ),
-        expected_output=f"{nb_questions} questions formatées avec réponses. Une seule bonne réponse par question.",
-        agent=agent_generateur
+        expected_output="30 questions formatées avec réponses. Une seule bonne réponse par question.",
+        agent=agent
     )
 
-    crew_temp = Crew(
-        agents=[agent_generateur],
-        tasks=[task_qcm],
-        verbose=False
-    )
+    crew = Crew(agents=[agent], tasks=[task], verbose=False)
+    qcm_text = str(crew.kickoff())
 
-    qcm_text = str(crew_temp.kickoff())
     pattern = r"(Question\s*\d+\s*:[^\n]+\n(?:[A-D]\)[^\n]*\n){4}Réponse\s*:\s*[A-D])"
     blocs = re.findall(pattern, qcm_text, re.DOTALL)
 
@@ -97,20 +78,3 @@ def generer_questions(chapitre, nb_questions=30):
         })
 
     return questions_list
-
-
-# === MODE TERMINAL (optionnel) ===
-if __name__ == "__main__":
-    theme = input("🎯 Thème du QCM (ex : Python, Scrum, SQL) : ")
-    chapitres = lister_chapitres(theme)
-    print("\n📚 Chapitres proposés :")
-    for idx, c in enumerate(chapitres, 1):
-        print(f"{idx}. {c}")
-
-    choix = int(input("\n👉 Choisissez un chapitre (numéro) : "))
-    chapitre = chapitres[choix - 1]
-
-    questions = generer_questions(chapitre, nb_questions=5)
-    print("\n📋 Exemple de questions :")
-    for q in questions:
-        print(f"- {q['question']} ({q['answer']})")
