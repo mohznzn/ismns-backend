@@ -13,82 +13,49 @@ llm = ChatOpenAI(
     model="gpt-3.5-turbo"
 )
 
-# === MODE TERMINAL (optionnel si tu veux tester en local) ===
-if __name__ == "__main__":
-    theme = input("🎯 Thème du QCM (ex : Python, Scrum, SQL) : ")
-    niveau = input("📈 Difficulté (débutant / intermédiaire / avancé) : ").lower()
+# === NOUVELLES FONCTIONS POUR LE BACKEND ===
 
-    questions = []
-
-    # Appel à la fonction de génération
-    questions = []
-
-    agent_generateur = Agent(
-        role="Générateur de QCM",
-        goal="Créer un QCM de 5 questions avec 4 choix et la bonne réponse",
-        backstory="Expert pédagogique spécialisé dans la création d'examens",
-        verbose=True,
+def lister_chapitres(theme):
+    """
+    Utilise l'IA pour lister les chapitres importants d'un thème donné.
+    """
+    agent_chapitres = Agent(
+        role="Expert en planification d'études",
+        goal="Lister les chapitres clés pour bien maîtriser un thème",
+        backstory="Spécialiste en pédagogie et en certifications",
+        verbose=False,
         allow_delegation=False,
         llm=llm
     )
 
-    task_qcm = Task(
+    task_chapitres = Task(
         description=(
-            f"Génère un QCM de 5 questions sur le thème : {theme}, pour un niveau {niveau}. "
-            "Chaque question doit avoir 4 choix (A, B, C, D) et une seule bonne réponse. "
-            "Format :\nQuestion 1: ...\nA) ...\nB) ...\nC) ...\nD) ...\nRéponse : X"
+            f"Liste 5 à 7 chapitres importants pour bien préparer le thème '{theme}'. "
+            "Donne uniquement la liste des chapitres sous forme de phrases courtes."
         ),
-        expected_output="5 questions formatées avec réponses. Une seule bonne réponse par question.",
-        agent=agent_generateur
+        expected_output="Une liste simple des chapitres, un par ligne.",
+        agent=agent_chapitres
     )
 
-    crew = Crew(
-        agents=[agent_generateur],
-        tasks=[task_qcm],
-        verbose=True
+    crew_temp = Crew(
+        agents=[agent_chapitres],
+        tasks=[task_chapitres],
+        verbose=False
     )
 
-    qcm_text = str(crew.kickoff())
+    chapitres_text = str(crew_temp.kickoff())
+    chapitres = [c.strip("-• ").strip() for c in chapitres_text.split("\n") if c.strip()]
 
-    # ✅ Extraction correcte des questions
-    pattern = r"(Question\s*\d+\s*:[^\n]+\n(?:[A-D]\)[^\n]*\n){4}Réponse\s*:\s*[A-D])"
-    blocs = re.findall(pattern, qcm_text, re.DOTALL)
+    return chapitres
 
-    score = 0
-    user_answers = []
 
-    print("\n📋 Début du test :")
-    for bloc in blocs:
-        match = re.search(r"Réponse\s*:\s*([A-D])", bloc)
-        bonne_reponse = match.group(1).strip() if match else None
-        question_sans_reponse = re.sub(r"Réponse\s*:\s*[A-D]", "", bloc).strip()
-
-        print(f"\n{question_sans_reponse}")
-        reponse_user = input("👉 Votre réponse (A, B, C ou D) : ").strip().upper()
-        user_answers.append((question_sans_reponse, bonne_reponse, reponse_user))
-
-        if reponse_user == bonne_reponse:
-            print("✅ Bonne réponse !")
-            score += 1
-        else:
-            print(f"❌ Mauvaise réponse. La bonne réponse était : {bonne_reponse}")
-
-    print("\n📊 Résultat final :")
-    print(f"Score : {score} / {len(blocs)}")
-
-    if score == len(blocs):
-        print("🎉 Excellent travail, vous avez tout juste !")
-    elif score >= len(blocs) // 2:
-        print("👍 Bon début, continuez comme ça pour progresser.")
-    else:
-        print("📘 Vous pouvez vous améliorer. N’hésitez pas à revoir le cours et refaire le test.")
-
-# === 🎯 FONCTION POUR USAGE DANS FLASK / BACKEND ===
-
-def generer_questions(theme, niveau):
+def generer_questions(chapitre, nb_questions=30):
+    """
+    Génère un QCM pour un chapitre donné avec un nombre de questions paramétrable.
+    """
     agent_generateur = Agent(
         role="Générateur de QCM",
-        goal="Créer un QCM de 5 questions avec 4 choix et la bonne réponse",
+        goal=f"Créer un QCM de {nb_questions} questions avec 4 choix et la bonne réponse",
         backstory="Expert pédagogique spécialisé dans la création d'examens",
         verbose=False,
         allow_delegation=False,
@@ -97,11 +64,11 @@ def generer_questions(theme, niveau):
 
     task_qcm = Task(
         description=(
-            f"Génère un QCM de 5 questions sur le thème : {theme}, pour un niveau {niveau}. "
+            f"Génère un QCM de {nb_questions} questions sur le chapitre : {chapitre}. "
             "Chaque question doit avoir 4 choix (A, B, C, D) et une seule bonne réponse. "
             "Format :\nQuestion 1: ...\nA) ...\nB) ...\nC) ...\nD) ...\nRéponse : X"
         ),
-        expected_output="5 questions formatées avec réponses. Une seule bonne réponse par question.",
+        expected_output=f"{nb_questions} questions formatées avec réponses. Une seule bonne réponse par question.",
         agent=agent_generateur
     )
 
@@ -130,3 +97,20 @@ def generer_questions(theme, niveau):
         })
 
     return questions_list
+
+
+# === MODE TERMINAL (optionnel) ===
+if __name__ == "__main__":
+    theme = input("🎯 Thème du QCM (ex : Python, Scrum, SQL) : ")
+    chapitres = lister_chapitres(theme)
+    print("\n📚 Chapitres proposés :")
+    for idx, c in enumerate(chapitres, 1):
+        print(f"{idx}. {c}")
+
+    choix = int(input("\n👉 Choisissez un chapitre (numéro) : "))
+    chapitre = chapitres[choix - 1]
+
+    questions = generer_questions(chapitre, nb_questions=5)
+    print("\n📋 Exemple de questions :")
+    for q in questions:
+        print(f"- {q['question']} ({q['answer']})")
