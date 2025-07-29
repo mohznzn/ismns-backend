@@ -17,8 +17,8 @@ def handle_options():
 
 
 # --- Endpoint pour obtenir les chapitres ---
-@app.route('/get_chapters', methods=['POST'])
-def get_chapters():
+@app.route('/generer_chapitres', methods=['POST'])
+def generer_chapitres():
     data = request.get_json()
     theme = data.get('theme')
 
@@ -34,8 +34,8 @@ def get_chapters():
 
 
 # --- Endpoint pour générer 30 questions sur un chapitre ---
-@app.route('/generate_qcm_chapter', methods=['POST'])
-def generate_qcm_chapter():
+@app.route('/generer_questions_chapitre', methods=['POST'])
+def generer_questions_chapitre():
     data = request.get_json()
     chapitre = data.get('chapitre')
 
