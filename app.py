@@ -34,8 +34,8 @@ def get_chapters():
 
 
 # --- Endpoint pour générer 30 questions sur un chapitre ---
-@app.route('/generer_questions_chapitre', methods=['POST'])
-def generer_questions_chapitre():
+@app.route('/generer_questions', methods=['POST'])
+def generer_questions():
     data = request.get_json()
     chapitre = data.get('chapitre')
 
