@@ -17,8 +17,8 @@ def handle_options():
 
 
 # --- Endpoint pour obtenir les chapitres ---
-@app.route('/generer_chapitres', methods=['POST'])
-def generer_chapitres():
+@app.route('/get_chapters', methods=['POST'])
+def get_chapters():
     data = request.get_json()
     theme = data.get('theme')
 
