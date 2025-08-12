@@ -6,13 +6,12 @@ from flask_cors import CORS
 app = Flask(__name__)
 
 # Autoriser plusieurs origines (prod + local). Liste via env ALLOWED_ORIGINS, séparées par virgules.
-# Exemple à mettre sur Render :
+# Exemple Render:
 # ALLOWED_ORIGINS = https://ismns-frontend-5qiq.vercel.app, http://localhost:3000
 allowed_env = os.getenv("ALLOWED_ORIGINS", "").strip()
 if allowed_env:
     ORIGINS = [o.strip() for o in allowed_env.split(",") if o.strip()]
 else:
-    # Valeurs par défaut raisonnables
     ORIGINS = [
         os.getenv("FRONTEND_URL", "http://localhost:3000"),
         r"https://.*\.vercel\.app$",
