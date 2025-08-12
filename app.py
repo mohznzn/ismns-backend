@@ -2,13 +2,33 @@ import os, uuid, secrets
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# ----- Config -----
+# ---------------- Config ----------------
 app = Flask(__name__)
-CORS(app, resources={r"*": {"origins": os.getenv("FRONTEND_URL", "*")}})
+
+# Autoriser plusieurs origines (prod + local). Liste via env ALLOWED_ORIGINS, séparées par virgules.
+# Exemple à mettre sur Render :
+# ALLOWED_ORIGINS = https://ismns-frontend-5qiq.vercel.app, http://localhost:3000
+allowed_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+if allowed_env:
+    ORIGINS = [o.strip() for o in allowed_env.split(",") if o.strip()]
+else:
+    # Valeurs par défaut raisonnables
+    ORIGINS = [
+        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        r"https://.*\.vercel\.app$",
+    ]
+
+CORS(
+    app,
+    resources={r"/*": {"origins": ORIGINS}},
+    methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    supports_credentials=False,
+)
 
 SHARE_SECRET = os.getenv("SHARE_SECRET", "dev_share_secret")
 
-# ----- Stockage en mémoire (MVP) -----
+# ---------------- Stockage en mémoire (MVP) ----------------
 QCMS = {}       # qcm_id -> qcm dict
 QUESTIONS = {}  # qcm_id -> list[question dict]
 PUBLIC = {}     # share_token -> qcm_id
@@ -16,14 +36,7 @@ PUBLIC = {}     # share_token -> qcm_id
 def make_share_token(qcm_id: str) -> str:
     return secrets.token_urlsafe(16) + "_" + qcm_id
 
-<<<<<<< HEAD
-# --- Endpoint pour obtenir les chapitres ---
-@app.route('/get_chapters', methods=['POST'])
-def get_chapters():
-    data = request.get_json()
-    theme = data.get('theme')
-=======
-# ----- Mock IA : génère un QCM à partir du JD -----
+# ---------------- Mock IA : génère un QCM à partir du JD ----------------
 def mock_generate_qcm_from_jd(job_description: str, language: str):
     skills = ["Fundamentals", "Problem Solving", "Tools/Tech"]
     base = []
@@ -43,9 +56,8 @@ def mock_generate_qcm_from_jd(job_description: str, language: str):
             "explanation": "Admin-only explanation for the correct answer."
         })
     return {"skills": skills, "questions": base}
->>>>>>> a2f002fb (feat: new draft flow)
 
-# ----- Routes -----
+# ---------------- Routes ----------------
 @app.get("/healthz")
 def healthz():
     return {"ok": True}, 200
@@ -72,7 +84,7 @@ def create_draft_from_jd():
     return jsonify({
         "qcm_id": qcm_id,
         "skills": gen["skills"],
-        "questions": gen["questions"]  # contient is_correct + explanation (admin only)
+        "questions": gen["questions"]  # is_correct + explanation (admin only)
     }), 201
 
 @app.get("/qcm/<qcm_id>/admin")
@@ -82,23 +94,6 @@ def get_qcm_admin(qcm_id):
         return jsonify({"error": "qcm not found"}), 404
     return jsonify({"qcm": qcm, "questions": QUESTIONS.get(qcm_id, [])})
 
-<<<<<<< HEAD
-# --- Endpoint pour générer 30 questions sur un chapitre ---
-@app.route('/generer_questions', methods=['POST'])
-def generer_questions():
-    data = request.get_json()
-    chapitre = data.get('chapitre')
-
-    if not chapitre:
-        return jsonify({"error": "Le chapitre est requis."}), 400
-
-    try:
-        questions = generer_questions_chapitre(chapitre)
-    except Exception as e:
-        return jsonify({"error": f"Erreur IA : {str(e)}"}), 500
-
-    return jsonify({"questions": questions})
-=======
 @app.post("/qcm/<qcm_id>/publish")
 def publish_qcm(qcm_id):
     qcm = QCMS.get(qcm_id)
@@ -112,7 +107,6 @@ def publish_qcm(qcm_id):
     PUBLIC[token] = qcm_id
     share_url = f"{os.getenv('FRONTEND_URL','http://localhost:3000')}/invite?token={token}"
     return jsonify({"share_url": share_url, "token": token}), 200
->>>>>>> a2f002fb (feat: new draft flow)
 
 @app.get("/public/qcm/<token>")
 def get_public_qcm(token):
@@ -127,10 +121,12 @@ def get_public_qcm(token):
             "id": q["id"],
             "skill_tag": q["skill_tag"],
             "text": q["text"],
-            "options": [{"id": o["id"], "text": o["text"]} for o in q["options"]]
+            "options": [{"id": o["id"], "text": o["text"]} for o in q["options"]],
         })
-    return jsonify({"qcm": {"id": qcm["id"], "language": qcm["language"]},
-                    "questions": public_questions}), 200
+    return jsonify({
+        "qcm": {"id": qcm["id"], "language": qcm["language"]},
+        "questions": public_questions
+    }), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
