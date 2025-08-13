@@ -147,8 +147,7 @@ Use STRICT JSON (no markdown). Schema:
 }}
 Job description:
 {job_description}
-"""),
-])
+"""),])
 
     parser = JsonOutputParser()
     chain = one_q_prompt | llm | parser
