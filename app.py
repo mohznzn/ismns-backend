@@ -38,7 +38,10 @@ def _ensure_scheme(url: str) -> str:
     return f"https://{url}"
 
 # =============== IA via LangChain (OpenAI) ===============
-# requirements.txt: langchain==0.2.11, langchain-openai==0.1.22
+# requirements.txt (versions compatibles) :
+# langchain==0.2.12
+# langchain-openai==0.1.23
+# openai==1.51.0
 try:
     from langchain_openai import ChatOpenAI
     from langchain_core.prompts import ChatPromptTemplate
@@ -47,16 +50,19 @@ try:
 except Exception:
     _LC_READY = False
 
+
 def _lc_llm(temp: float = 0.5):
     """Crée un LLM LangChain; renvoie None si package/clé absents."""
     if not _LC_READY:
         return None
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
+    if not os.getenv("OPENAI_API_KEY", "").strip():
         return None
     # ChatOpenAI lit OPENAI_API_KEY depuis l'env automatiquement
     return ChatOpenAI(model="gpt-4o-mini", temperature=temp)
 
+
+# ⚠️ Les accolades du JSON sont échappées en {{ }} pour ne pas être prises
+# pour des variables de template par LangChain.
 PROMPT_TEMPLATE = """You are an expert test author. Given a job description and a target language, do:
 1) Extract 4–6 core skills (short labels).
 2) Generate {num_questions} high-quality multiple-choice questions (MCQ) in the language: {language}.
@@ -102,7 +108,7 @@ def generate_qcm_from_jd_langchain(job_description: str, language: str, num_ques
     data = chain.invoke({
         "job_description": job_description,
         "language": language,
-        "num_questions": int(num_questions)
+        "num_questions": int(num_questions),
     })
 
     skills = data.get("skills") or []
@@ -115,7 +121,7 @@ def generate_qcm_from_jd_langchain(job_description: str, language: str, num_ques
             options.append({
                 "id": str(uuid.uuid4()),
                 "text": str(opt_text),
-                "is_correct": (k == correct_idx)
+                "is_correct": (k == correct_idx),
             })
         out_questions.append({
             "id": qid,
@@ -124,19 +130,22 @@ def generate_qcm_from_jd_langchain(job_description: str, language: str, num_ques
             "options": options,
             "explanation": str(q.get("explanation", "")).strip(),
         })
+
     if not out_questions:
         raise RuntimeError("Model returned no questions")
+
     return {"skills": skills, "questions": out_questions}
+
 
 def regenerate_one_question_langchain(job_description: str, language: str, skill: str):
     llm = _lc_llm(0.6)
     if not llm:
         raise RuntimeError("LangChain/OpenAI not available or OPENAI_API_KEY missing")
 
-one_q_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You write recruiting MCQs. Output strict JSON only."),
-    ("user",
-     """Regenerate exactly ONE MCQ for the skill "{skill}" in language: {language}.
+    one_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You write recruiting MCQs. Output strict JSON only."),
+        ("user",
+         """Regenerate exactly ONE MCQ for the skill "{skill}" in language: {language}.
 Use STRICT JSON (no markdown). Schema:
 {{
   "skill": "...",
@@ -147,7 +156,8 @@ Use STRICT JSON (no markdown). Schema:
 }}
 Job description:
 {job_description}
-"""),])
+"""),
+    ])
 
     parser = JsonOutputParser()
     chain = one_q_prompt | llm | parser
@@ -155,10 +165,10 @@ Job description:
     q = chain.invoke({
         "skill": skill,
         "language": language,
-        "job_description": job_description
+        "job_description": job_description,
     })
 
-    # Supporte un objet direct ou un format {"questions":[...]}
+    # Support {"questions":[{...}]} ou objet direct
     if isinstance(q, dict) and "questions" in q and isinstance(q["questions"], list) and q["questions"]:
         q = q["questions"][0]
 
@@ -169,8 +179,9 @@ Job description:
         options.append({
             "id": str(uuid.uuid4()),
             "text": str(txt),
-            "is_correct": (k == correct_idx)
+            "is_correct": (k == correct_idx),
         })
+
     return {
         "id": new_qid,
         "skill_tag": q.get("skill", skill),
@@ -178,6 +189,7 @@ Job description:
         "options": options,
         "explanation": str(q.get("explanation", "")).strip(),
     }
+
 
 # =============== Routes ===============
 @app.get("/healthz")
