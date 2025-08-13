@@ -73,18 +73,19 @@ Constraints:
 - Return STRICT JSON ONLY (no markdown, no code fences).
 
 Return JSON object:
-{
+{{
   "skills": ["..."],
   "questions": [
-    {
+    {{
       "skill": "...",
       "question": "...",
       "options": ["...","...","...","..."],
       "correct_index": 0,
       "explanation": "..."
-    }
+    }}
   ]
-}"""
+}}"""
+
 
 def generate_qcm_from_jd_langchain(job_description: str, language: str, num_questions: int = 12):
     llm = _lc_llm(0.5)
@@ -132,22 +133,23 @@ def regenerate_one_question_langchain(job_description: str, language: str, skill
     if not llm:
         raise RuntimeError("LangChain/OpenAI not available or OPENAI_API_KEY missing")
 
-    one_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You write recruiting MCQs. Output strict JSON only."),
-        ("user",
-         """Regenerate exactly ONE MCQ for the skill "{skill}" in language: {language}.
+one_q_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You write recruiting MCQs. Output strict JSON only."),
+    ("user",
+     """Regenerate exactly ONE MCQ for the skill "{skill}" in language: {language}.
 Use STRICT JSON (no markdown). Schema:
-{
+{{
   "skill": "...",
   "question": "...",
   "options": ["...","...","...","..."],
   "correct_index": 0,
   "explanation": "..."
-}
+}}
 Job description:
 {job_description}
 """),
-    ])
+])
+
     parser = JsonOutputParser()
     chain = one_q_prompt | llm | parser
 
