@@ -1,6 +1,8 @@
 # app.py
 import os, uuid, secrets, json
 from datetime import datetime, timedelta, timezone
+from functools import wraps
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -10,6 +12,7 @@ from db import (
     Qcm, Question, Option, Invite, Attempt, Answer, invite_is_valid
 )
 from sqlalchemy.orm import selectinload
+from sqlalchemy import func, text  # func pour agrégats, text pour diag SQL brut
 
 # =============== Config Flask + CORS ===============
 app = Flask(__name__)
@@ -42,6 +45,21 @@ def _ensure_scheme(url: str) -> str:
 
 def make_share_token(qcm_id: str) -> str:
     return secrets.token_urlsafe(24) + "_" + qcm_id
+
+
+# =============== Auth admin optionnelle (Bearer) ===============
+ADMIN_BEARER = os.getenv("ADMIN_BEARER", "").strip()
+
+def require_admin_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        # Si ADMIN_BEARER n'est pas défini, on ne force rien (MVP/dev).
+        if ADMIN_BEARER:
+            auth = request.headers.get("Authorization", "")
+            if not auth.startswith("Bearer ") or auth.split(" ", 1)[1].strip() != ADMIN_BEARER:
+                return jsonify({"error": "unauthorized"}), 401
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 # =============== IA via LangChain (OpenAI) ===============
@@ -200,7 +218,7 @@ def diag():
     has_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
     db_ok = True
     try:
-        s = SessionLocal(); s.execute("SELECT 1;"); s.close()
+        s = SessionLocal(); s.execute(text("SELECT 1")); s.close()
     except Exception:
         db_ok = False
     return jsonify({
@@ -279,6 +297,7 @@ def create_draft_from_jd():
         session.close()
 
 @app.get("/qcm/<qcm_id>/admin")
+@require_admin_auth
 def get_qcm_admin(qcm_id):
     session = SessionLocal()
     try:
@@ -313,6 +332,7 @@ def get_qcm_admin(qcm_id):
         session.close()
 
 @app.post("/qcm/<qcm_id>/question/<qid>/regenerate")
+@require_admin_auth
 def regenerate_question(qcm_id, qid):
     session = SessionLocal()
     try:
@@ -367,6 +387,7 @@ def regenerate_question(qcm_id, qid):
         session.close()
 
 @app.post("/qcm/<qcm_id>/publish")
+@require_admin_auth
 def publish_qcm(qcm_id):
     session = SessionLocal()
     try:
@@ -383,7 +404,7 @@ def publish_qcm(qcm_id):
         invite = Invite(
             qcm_id=qcm.id,
             token=token,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),  # <-- aware
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),  # aware
             max_uses=0,
             used_count=0
         )
@@ -464,7 +485,7 @@ def start_attempt():
             qcm_id=qcm.id,
             invite_id=inv.id,
             candidate_email=email,
-            started_at=datetime.now(timezone.utc),  # <-- aware
+            started_at=datetime.now(timezone.utc),  # aware
             seed=None
         )
         session.add(at)
@@ -576,12 +597,11 @@ def finish_attempt(attempt_id):
         if total_questions > 0:
             score = round(100 * correct_count / total_questions)
 
-        # Datetime *aware* pour éviter "can't subtract offset-naive and offset-aware datetimes"
+        # Datetime aware (UTC)
         now = datetime.now(timezone.utc)
 
         start = at.started_at
         if start is not None and getattr(start, "tzinfo", None) is None:
-            # au cas où la colonne serait naïve : on force UTC
             start = start.replace(tzinfo=timezone.utc)
 
         at.finished_at = now
@@ -607,6 +627,7 @@ def finish_attempt(attempt_id):
 
 # =============== Routes: Admin résultats ===============
 @app.get("/admin/qcm/<qcm_id>/results")
+@require_admin_auth
 def qcm_results(qcm_id):
     """
     Liste des tentatives pour un QCM (tableau admin).
@@ -635,6 +656,7 @@ def qcm_results(qcm_id):
         session.close()
 
 @app.get("/admin/attempts/<attempt_id>")
+@require_admin_auth
 def attempt_detail(attempt_id):
     """
     Détail d'une tentative (admin) avec correction et explications.
@@ -685,6 +707,94 @@ def attempt_detail(attempt_id):
         })
     finally:
         session.close()
+
+
+# =============== Nouveaux endpoints admin globaux ===============
+@app.get("/admin/attempts")
+@require_admin_auth
+def list_attempts():
+    """
+    Query params:
+      qcm_id, email, status=all|finished|ongoing,
+      page=1, page_size=20 (max 100),
+      order_by=started_at|finished_at|score, order_dir=desc|asc
+    """
+    s = SessionLocal()
+    try:
+        qcm_id = (request.args.get("qcm_id") or "").strip() or None
+        email = (request.args.get("email") or "").strip() or None
+        status = (request.args.get("status") or "all").lower()
+        order_by = (request.args.get("order_by") or "started_at").lower()
+        order_dir = (request.args.get("order_dir") or "desc").lower()
+        page = max(int(request.args.get("page") or 1), 1)
+        page_size = max(min(int(request.args.get("page_size") or 20), 100), 1)
+
+        q = s.query(Attempt)
+
+        if qcm_id:
+            q = q.filter(Attempt.qcm_id == qcm_id)
+        if email:
+            q = q.filter(Attempt.candidate_email.ilike(f"%{email}%"))
+        if status == "finished":
+            q = q.filter(Attempt.finished_at.isnot(None))
+        elif status == "ongoing":
+            q = q.filter(Attempt.finished_at.is_(None))
+
+        total = q.count()
+
+        col = Attempt.started_at
+        if order_by == "finished_at":
+            col = Attempt.finished_at
+        elif order_by == "score":
+            col = Attempt.score
+
+        if order_dir == "asc":
+            q = q.order_by(col.asc().nullslast())
+        else:
+            q = q.order_by(col.desc().nullslast())
+
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+
+        items = []
+        for a in rows:
+            items.append({
+                "attempt_id": a.id,
+                "qcm_id": a.qcm_id,
+                "candidate_email": a.candidate_email,
+                "started_at": a.started_at.isoformat() if a.started_at else None,
+                "finished_at": a.finished_at.isoformat() if a.finished_at else None,
+                "duration_s": a.duration_s,
+                "score": a.score,
+            })
+
+        return jsonify({"items": items, "total": total, "page": page, "page_size": page_size})
+    finally:
+        s.close()
+
+@app.get("/admin/qcms")
+@require_admin_auth
+def list_qcms():
+    s = SessionLocal()
+    try:
+        qcms = s.query(Qcm).all()
+        counts = dict(
+            s.query(Attempt.qcm_id, func.count(Attempt.id))
+            .group_by(Attempt.qcm_id)
+            .all()
+        )
+        items = []
+        for q in qcms:
+            items.append({
+                "id": q.id,
+                "language": q.language,
+                "status": q.status,
+                "skills_count": len(json.loads(q.skills_json or "[]")),
+                "attempts_count": counts.get(q.id, 0),
+                "share_token": q.share_token,
+            })
+        return jsonify({"items": items})
+    finally:
+        s.close()
 
 
 # =============== Main ===============
