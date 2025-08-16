@@ -1,7 +1,6 @@
 # app.py
 import os, uuid, secrets, json
 from datetime import datetime, timedelta, timezone
-from functools import wraps
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -45,21 +44,6 @@ def _ensure_scheme(url: str) -> str:
 
 def make_share_token(qcm_id: str) -> str:
     return secrets.token_urlsafe(24) + "_" + qcm_id
-
-
-# =============== Auth admin optionnelle (Bearer) ===============
-ADMIN_BEARER = os.getenv("ADMIN_BEARER", "").strip()
-
-def require_admin_auth(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        # Si ADMIN_BEARER n'est pas défini, on ne force rien (MVP/dev).
-        if ADMIN_BEARER:
-            auth = request.headers.get("Authorization", "")
-            if not auth.startswith("Bearer ") or auth.split(" ", 1)[1].strip() != ADMIN_BEARER:
-                return jsonify({"error": "unauthorized"}), 401
-        return fn(*args, **kwargs)
-    return wrapper
 
 
 # =============== IA via LangChain (OpenAI) ===============
@@ -297,7 +281,6 @@ def create_draft_from_jd():
         session.close()
 
 @app.get("/qcm/<qcm_id>/admin")
-@require_admin_auth
 def get_qcm_admin(qcm_id):
     session = SessionLocal()
     try:
@@ -332,7 +315,6 @@ def get_qcm_admin(qcm_id):
         session.close()
 
 @app.post("/qcm/<qcm_id>/question/<qid>/regenerate")
-@require_admin_auth
 def regenerate_question(qcm_id, qid):
     session = SessionLocal()
     try:
@@ -387,7 +369,6 @@ def regenerate_question(qcm_id, qid):
         session.close()
 
 @app.post("/qcm/<qcm_id>/publish")
-@require_admin_auth
 def publish_qcm(qcm_id):
     session = SessionLocal()
     try:
@@ -599,7 +580,6 @@ def finish_attempt(attempt_id):
 
         # Datetime aware (UTC)
         now = datetime.now(timezone.utc)
-
         start = at.started_at
         if start is not None and getattr(start, "tzinfo", None) is None:
             start = start.replace(tzinfo=timezone.utc)
@@ -627,7 +607,6 @@ def finish_attempt(attempt_id):
 
 # =============== Routes: Admin résultats ===============
 @app.get("/admin/qcm/<qcm_id>/results")
-@require_admin_auth
 def qcm_results(qcm_id):
     """
     Liste des tentatives pour un QCM (tableau admin).
@@ -656,7 +635,6 @@ def qcm_results(qcm_id):
         session.close()
 
 @app.get("/admin/attempts/<attempt_id>")
-@require_admin_auth
 def attempt_detail(attempt_id):
     """
     Détail d'une tentative (admin) avec correction et explications.
@@ -711,7 +689,6 @@ def attempt_detail(attempt_id):
 
 # =============== Nouveaux endpoints admin globaux ===============
 @app.get("/admin/attempts")
-@require_admin_auth
 def list_attempts():
     """
     Query params:
@@ -772,7 +749,6 @@ def list_attempts():
         s.close()
 
 @app.get("/admin/qcms")
-@require_admin_auth
 def list_qcms():
     s = SessionLocal()
     try:
