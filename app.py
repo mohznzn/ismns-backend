@@ -1,6 +1,6 @@
 # app.py
 import os, uuid, secrets, json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -383,7 +383,7 @@ def publish_qcm(qcm_id):
         invite = Invite(
             qcm_id=qcm.id,
             token=token,
-            expires_at=datetime.utcnow() + timedelta(days=30),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),  # <-- aware
             max_uses=0,
             used_count=0
         )
@@ -464,7 +464,7 @@ def start_attempt():
             qcm_id=qcm.id,
             invite_id=inv.id,
             candidate_email=email,
-            started_at=datetime.utcnow(),  # explicite
+            started_at=datetime.now(timezone.utc),  # <-- aware
             seed=None
         )
         session.add(at)
@@ -576,10 +576,17 @@ def finish_attempt(attempt_id):
         if total_questions > 0:
             score = round(100 * correct_count / total_questions)
 
-        now = datetime.utcnow()
+        # Datetime *aware* pour éviter "can't subtract offset-naive and offset-aware datetimes"
+        now = datetime.now(timezone.utc)
+
+        start = at.started_at
+        if start is not None and getattr(start, "tzinfo", None) is None:
+            # au cas où la colonne serait naïve : on force UTC
+            start = start.replace(tzinfo=timezone.utc)
+
         at.finished_at = now
-        if at.started_at:
-            at.duration_s = int((now - at.started_at).total_seconds())
+        if start:
+            at.duration_s = int((now - start).total_seconds())
         at.score = score
 
         session.commit()
