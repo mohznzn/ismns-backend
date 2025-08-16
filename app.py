@@ -7,7 +7,7 @@ from flask_cors import CORS
 # === DB imports (depuis ton db.py) ===
 from db import (
     SessionLocal, create_all_tables,
-    Qcm, Question, Option, Invite, invite_is_valid
+    Qcm, Question, Option, Invite, Attempt, Answer, invite_is_valid
 )
 from sqlalchemy.orm import selectinload
 
@@ -31,7 +31,7 @@ CORS(
     supports_credentials=False,
 )
 
-# Création auto des tables en dev (désactive en prod si tu utilises Alembic)
+# Création auto des tables en dev (désactive en prod si Alembic)
 if os.getenv("DB_AUTO_CREATE", "false").lower() == "true":
     create_all_tables()
 
@@ -45,10 +45,8 @@ def make_share_token(qcm_id: str) -> str:
 
 
 # =============== IA via LangChain (OpenAI) ===============
-# requirements (compatibles Python 3.13) :
-# langchain==0.2.12
-# langchain-openai==0.1.23
-# openai==1.51.0
+# requirements (compatibles Python 3.13):
+# langchain==0.2.12, langchain-openai==0.1.23, openai==1.51.0
 try:
     from langchain_openai import ChatOpenAI
     from langchain_core.prompts import ChatPromptTemplate
@@ -57,16 +55,13 @@ try:
 except Exception:
     _LC_READY = False
 
-
 def _lc_llm(temp: float = 0.5):
     """Crée un LLM LangChain; renvoie None si package/clé absents."""
     if not _LC_READY:
         return None
     if not os.getenv("OPENAI_API_KEY", "").strip():
         return None
-    # ChatOpenAI lit OPENAI_API_KEY depuis l'env automatiquement
     return ChatOpenAI(model="gpt-4o-mini", temperature=temp)
-
 
 # ⚠️ Doubler les accolades pour échapper le JSON dans le prompt formatable
 PROMPT_TEMPLATE = """You are an expert test author. Given a job description and a target language, do:
@@ -97,7 +92,6 @@ Return JSON object:
     }}
   ]
 }}"""
-
 
 def generate_qcm_from_jd_langchain(job_description: str, language: str, num_questions: int = 12):
     llm = _lc_llm(0.5)
@@ -142,7 +136,6 @@ def generate_qcm_from_jd_langchain(job_description: str, language: str, num_ques
 
     return {"skills": skills, "questions": out_questions}
 
-
 def regenerate_one_question_langchain(job_description: str, language: str, skill: str):
     llm = _lc_llm(0.6)
     if not llm:
@@ -185,11 +178,10 @@ Job description:
         options.append({
             "id": str(uuid.uuid4()),
             "text": str(txt),
-            "is_correct": (k == correct_idx),
+            "is_correct": (k == correct_idx)
         })
-
     return {
-        "id": new_qid,  # on génère un nouvel id si on veut remplacer
+        "id": new_qid,
         "skill_tag": q.get("skill", skill),
         "text": str(q.get("question", "")).strip(),
         "options": options,
@@ -197,7 +189,7 @@ Job description:
     }
 
 
-# =============== Routes ===============
+# =============== Routes: santé & diag ===============
 @app.get("/healthz")
 def healthz():
     return {"ok": True}, 200
@@ -206,7 +198,6 @@ def healthz():
 def diag():
     has_pkg = bool(_LC_READY)
     has_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
-    # petit check DB
     db_ok = True
     try:
         s = SessionLocal(); s.execute("SELECT 1;"); s.close()
@@ -219,6 +210,7 @@ def diag():
     })
 
 
+# =============== Routes: QCM (admin) ===============
 @app.post("/qcm/create_draft_from_jd")
 def create_draft_from_jd():
     data = request.get_json(silent=True) or {}
@@ -241,7 +233,6 @@ def create_draft_from_jd():
             "message": str(e)
         }), 502
 
-    # --- Persistance DB ---
     session = SessionLocal()
     try:
         qcm = Qcm(
@@ -255,10 +246,9 @@ def create_draft_from_jd():
         session.add(qcm)
         session.flush()
 
-        # Insérer questions + options
         for q in gen["questions"]:
             qq = Question(
-                id=q["id"],  # on réutilise l'id généré en mémoire pour cohérence avec le front
+                id=q["id"],
                 qcm_id=qcm.id,
                 skill=q["skill_tag"],
                 text=q["text"],
@@ -276,7 +266,6 @@ def create_draft_from_jd():
 
         session.commit()
 
-        # Réponse (reprend la structure admin)
         return jsonify({
             "qcm_id": qcm.id,
             "skills": gen["skills"],
@@ -288,7 +277,6 @@ def create_draft_from_jd():
         return jsonify({"error": "DB_WRITE_FAILED", "message": str(e)}), 500
     finally:
         session.close()
-
 
 @app.get("/qcm/<qcm_id>/admin")
 def get_qcm_admin(qcm_id):
@@ -324,7 +312,6 @@ def get_qcm_admin(qcm_id):
     finally:
         session.close()
 
-
 @app.post("/qcm/<qcm_id>/question/<qid>/regenerate")
 def regenerate_question(qcm_id, qid):
     session = SessionLocal()
@@ -340,7 +327,6 @@ def regenerate_question(qcm_id, qid):
         if not target or target.qcm_id != qcm.id:
             return jsonify({"error": "question not found"}), 404
 
-        # Génère une nouvelle question (on met à jour EN PLACE: même id)
         try:
             gen_q = regenerate_one_question_langchain(
                 job_description=qcm.job_description,
@@ -350,12 +336,10 @@ def regenerate_question(qcm_id, qid):
         except Exception as e:
             return jsonify({"error": "LANGCHAIN_REGENERATE_FAILED", "message": str(e)}), 502
 
-        # Update question
         target.skill = gen_q["skill_tag"]
         target.text = gen_q["text"]
         target.explanation = gen_q.get("explanation") or ""
 
-        # Remplace les options
         session.query(Option).filter(Option.question_id == target.id).delete(synchronize_session=False)
         for opt in gen_q["options"]:
             session.add(Option(
@@ -367,10 +351,9 @@ def regenerate_question(qcm_id, qid):
 
         session.commit()
 
-        # Relecture options pour réponse
         updated_opts = session.query(Option).filter(Option.question_id == target.id).all()
         out_q = {
-            "id": target.id,  # on garde le même id pour le front
+            "id": target.id,
             "skill_tag": target.skill,
             "text": target.text,
             "options": [{"id": o.id, "text": o.text, "is_correct": o.is_correct} for o in updated_opts],
@@ -382,7 +365,6 @@ def regenerate_question(qcm_id, qid):
         return jsonify({"error": "DB_UPDATE_FAILED", "message": str(e)}), 500
     finally:
         session.close()
-
 
 @app.post("/qcm/<qcm_id>/publish")
 def publish_qcm(qcm_id):
@@ -401,8 +383,8 @@ def publish_qcm(qcm_id):
         invite = Invite(
             qcm_id=qcm.id,
             token=token,
-            expires_at=datetime.utcnow() + timedelta(days=30),  # 30 jours par défaut
-            max_uses=0,  # 0 = illimité
+            expires_at=datetime.utcnow() + timedelta(days=30),
+            max_uses=0,
             used_count=0
         )
         session.add(invite)
@@ -418,6 +400,7 @@ def publish_qcm(qcm_id):
         session.close()
 
 
+# =============== Routes: Public (candidat) ===============
 @app.get("/public/qcm/<token>")
 def get_public_qcm(token):
     session = SessionLocal()
@@ -439,7 +422,7 @@ def get_public_qcm(token):
                 "id": q.id,
                 "skill_tag": q.skill,
                 "text": q.text,
-                "options": [{"id": o.id, "text": o.text} for o in q.options]  # pas de is_correct/explanation publiquement
+                "options": [{"id": o.id, "text": o.text} for o in q.options]  # pas de is_correct/explanation
             })
 
         return jsonify({
@@ -450,7 +433,253 @@ def get_public_qcm(token):
         session.close()
 
 
+# =============== Routes: Attempts/Answers (candidat) ===============
+@app.post("/attempts/start")
+def start_attempt():
+    """
+    Body: { "token": "...", "candidate_email": "optional@email" }
+    Crée une Attempt et renvoie l’épreuve (questions sans solutions).
+    """
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    email = (data.get("candidate_email") or "").strip() or None
+    if not token:
+        return jsonify({"error": "token required"}), 400
+
+    session = SessionLocal()
+    try:
+        inv = session.query(Invite).filter(Invite.token == token).first()
+        if not inv or not invite_is_valid(inv):
+            return jsonify({"error": "invalid token"}), 404
+
+        qcm = session.get(
+            Qcm, inv.qcm_id,
+            options=[selectinload(Qcm.questions).selectinload(Question.options)]
+        )
+        if not qcm:
+            return jsonify({"error": "qcm not found"}), 404
+
+        at = Attempt(
+            id=str(uuid.uuid4()),
+            qcm_id=qcm.id,
+            invite_id=inv.id,
+            candidate_email=email,
+            started_at=datetime.utcnow(),  # explicite
+            seed=None
+        )
+        session.add(at)
+
+        if inv.max_uses and inv.max_uses > 0:
+            inv.used_count = (inv.used_count or 0) + 1
+
+        session.commit()
+
+        questions = []
+        for qu in qcm.questions:
+            questions.append({
+                "id": qu.id,
+                "skill_tag": qu.skill,
+                "text": qu.text,
+                "options": [{"id": o.id, "text": o.text} for o in qu.options]
+            })
+
+        return jsonify({
+            "attempt_id": at.id,
+            "qcm": {"id": qcm.id, "language": qcm.language},
+            "questions": questions
+        }), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({"error": "ATTEMPT_START_FAILED", "message": str(e)}), 500
+    finally:
+        session.close()
+
+@app.post("/attempts/<attempt_id>/answer")
+def save_answer(attempt_id):
+    """
+    Body: { "question_id": "...", "option_id": "..." }
+    Upsert de la réponse. Pas de correction renvoyée.
+    """
+    data = request.get_json(silent=True) or {}
+    qid = (data.get("question_id") or "").strip()
+    oid = (data.get("option_id") or "").strip()
+    if not qid or not oid:
+        return jsonify({"error": "question_id and option_id are required"}), 400
+
+    session = SessionLocal()
+    try:
+        at = session.get(Attempt, attempt_id)
+        if not at:
+            return jsonify({"error": "attempt not found"}), 404
+        if at.finished_at:
+            return jsonify({"error": "attempt already finished"}), 400
+
+        q = session.get(Question, qid, options=[selectinload(Question.options)])
+        if not q or q.qcm_id != at.qcm_id:
+            return jsonify({"error": "question invalid for this attempt"}), 400
+
+        opt = session.get(Option, oid)
+        if not opt or opt.question_id != q.id:
+            return jsonify({"error": "option invalid for this question"}), 400
+
+        is_corr = bool(opt.is_correct)
+
+        # upsert
+        ans = session.query(Answer).filter(
+            Answer.attempt_id == at.id, Answer.question_id == q.id
+        ).first()
+        if ans:
+            ans.option_id = opt.id
+            ans.correct = is_corr
+        else:
+            ans = Answer(
+                id=str(uuid.uuid4()),
+                attempt_id=at.id,
+                question_id=q.id,
+                option_id=opt.id,
+                correct=is_corr
+            )
+            session.add(ans)
+
+        session.commit()
+        return jsonify({"saved": True}), 200
+    except Exception as e:
+        session.rollback()
+        return jsonify({"error": "ANSWER_SAVE_FAILED", "message": str(e)}), 500
+    finally:
+        session.close()
+
+@app.post("/attempts/<attempt_id>/finish")
+def finish_attempt(attempt_id):
+    """
+    Calcule le score et clôture la tentative.
+    Response: { score, correct_count, answered_count, total_questions, duration_s }
+    """
+    session = SessionLocal()
+    try:
+        at = session.get(Attempt, attempt_id)
+        if not at:
+            return jsonify({"error": "attempt not found"}), 404
+        if at.finished_at:
+            return jsonify({"error": "attempt already finished"}), 400
+
+        qcm = session.get(Qcm, at.qcm_id, options=[selectinload(Qcm.questions)])
+        if not qcm:
+            return jsonify({"error": "qcm not found"}), 404
+
+        answers = session.query(Answer).filter(Answer.attempt_id == at.id).all()
+        correct_count = sum(1 for a in answers if a.correct)
+        answered_count = len(answers)
+        total_questions = len(qcm.questions) if qcm.questions else 0
+
+        score = 0
+        if total_questions > 0:
+            score = round(100 * correct_count / total_questions)
+
+        now = datetime.utcnow()
+        at.finished_at = now
+        if at.started_at:
+            at.duration_s = int((now - at.started_at).total_seconds())
+        at.score = score
+
+        session.commit()
+
+        return jsonify({
+            "score": score,
+            "correct_count": correct_count,
+            "answered_count": answered_count,
+            "total_questions": total_questions,
+            "duration_s": at.duration_s or 0
+        }), 200
+    except Exception as e:
+        session.rollback()
+        return jsonify({"error": "ATTEMPT_FINISH_FAILED", "message": str(e)}), 500
+    finally:
+        session.close()
+
+
+# =============== Routes: Admin résultats ===============
+@app.get("/admin/qcm/<qcm_id>/results")
+def qcm_results(qcm_id):
+    """
+    Liste des tentatives pour un QCM (tableau admin).
+    """
+    session = SessionLocal()
+    try:
+        qcm = session.get(Qcm, qcm_id)
+        if not qcm:
+            return jsonify({"error": "qcm not found"}), 404
+
+        attempts = session.query(Attempt).filter(Attempt.qcm_id == qcm.id).all()
+        out = []
+        for a in attempts:
+            ans_count = session.query(Answer).filter(Answer.attempt_id == a.id).count()
+            out.append({
+                "attempt_id": a.id,
+                "candidate_email": a.candidate_email,
+                "started_at": a.started_at.isoformat() if a.started_at else None,
+                "finished_at": a.finished_at.isoformat() if a.finished_at else None,
+                "duration_s": a.duration_s,
+                "score": a.score,
+                "answered_count": ans_count
+            })
+        return jsonify({"qcm_id": qcm.id, "results": out})
+    finally:
+        session.close()
+
+@app.get("/admin/attempts/<attempt_id>")
+def attempt_detail(attempt_id):
+    """
+    Détail d'une tentative (admin) avec correction et explications.
+    """
+    session = SessionLocal()
+    try:
+        at = session.get(Attempt, attempt_id)
+        if not at:
+            return jsonify({"error": "attempt not found"}), 404
+
+        qcm = session.get(
+            Qcm, at.qcm_id,
+            options=[selectinload(Qcm.questions).selectinload(Question.options)]
+        )
+
+        answers = session.query(Answer).filter(Answer.attempt_id == at.id).all()
+        by_qid = {a.question_id: a for a in answers}
+
+        details = []
+        for qu in qcm.questions:
+            ans = by_qid.get(qu.id)
+            selected_opt = None
+            if ans:
+                selected_opt = next((o for o in qu.options if o.id == ans.option_id), None)
+            correct_opt = next((o for o in qu.options if o.is_correct), None)
+            details.append({
+                "question_id": qu.id,
+                "text": qu.text,
+                "selected_option_id": ans.option_id if ans else None,
+                "selected_option_text": selected_opt.text if selected_opt else None,
+                "correct_option_id": correct_opt.id if correct_opt else None,
+                "correct_option_text": correct_opt.text if correct_opt else None,
+                "correct": bool(ans.correct) if ans else False,
+                "explanation": qu.explanation or ""
+            })
+
+        return jsonify({
+            "attempt": {
+                "id": at.id,
+                "qcm_id": at.qcm_id,
+                "candidate_email": at.candidate_email,
+                "started_at": at.started_at.isoformat() if at.started_at else None,
+                "finished_at": at.finished_at.isoformat() if at.finished_at else None,
+                "duration_s": at.duration_s,
+                "score": at.score
+            },
+            "questions": details
+        })
+    finally:
+        session.close()
+
+
 # =============== Main ===============
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-
